@@ -1,0 +1,823 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="theme-color" content="#0b2748" />
+  <!-- PWA：スマホでは横画面専用（manifest の "orientation": "landscape"）。
+       縦向きのときの案内オーバーレイは本体側（#rotateOverlay）でも出す -->
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="data:," />
+  <title>Yohoho x ブロスタ ゲームプロトタイプ</title>
+
+  <!-- フォント -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@500;700;800;900&display=swap" rel="stylesheet">
+
+  <!--
+    CSS：役割ごとに分割（見た目はここだけ。HTMLに style 属性は書かない）
+      assets/css/base.css   … 土台：色・フォント・全体の枠・共通部品
+      assets/css/lobby.css  … 待ち受けロビー
+      assets/css/rooms.css  … キャラ部屋／作戦部屋／仲間部屋
+      assets/css/gacha.css  … ガチャ部屋
+      assets/css/game.css   … バトル画面（HUD・タッチ操作）／結果画面
+  -->
+  <link rel="stylesheet" href="css/base.css">
+  <link rel="stylesheet" href="css/lobby.css">
+  <link rel="stylesheet" href="css/rooms.css">
+  <link rel="stylesheet" href="css/gacha.css">
+  <link rel="stylesheet" href="css/game.css">
+  <link rel="stylesheet" href="css/net.css">
+</head>
+<body>
+  <div id="wrap">
+
+    <!-- ================= バトル用 上バー（バトル中だけ表示） =================
+         左：ステージ名の銘板／中央：残り・キル・時間のステータス／右：音とロビー。
+         数値の更新は game.js（aliveUI／killUI／timeUI／stagePill）、
+         音ボタンの文字は sound.js が textContent で書き換えるので、
+         stagePill と sfxTopBtn の中には子要素を入れないこと。
+         右端は「リスタート」ではなく「ロビー」：押すとバトルを終了して
+         ロビーに戻る（input.js の backToLobby()）。 -->
+    <div id="topbar" class="hidden">
+      <div class="topbar-stage">
+        <span class="topbar-flag" aria-hidden="true">🏴‍☠️</span>
+        <div class="pill stage-pill" id="stagePill">🏴‍☠️ 海賊アリーナ・バトロワ</div>
+      </div>
+      <div class="topbar-stats">
+        <div class="stat stat-alive" id="aliveChip">
+          <span class="stat-ic" aria-hidden="true">👥</span>
+          <span class="stat-body"><small>残り</small><span class="stat-num"><b id="aliveUI">10</b><em>人</em></span></span>
+        </div>
+        <div class="stat stat-kill">
+          <span class="stat-ic" aria-hidden="true">💀</span>
+          <span class="stat-body"><small>キル</small><span class="stat-num"><b id="killUI">0</b></span></span>
+        </div>
+        <div class="stat stat-time">
+          <span class="stat-ic" aria-hidden="true">⏱️</span>
+          <span class="stat-body"><small>時間</small><span class="stat-num"><b id="timeUI">0:00</b></span></span>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <button id="sfxTopBtn" type="button">🔊 音ON</button>
+        <button id="restartTop" type="button">🏠 ロビー</button>
+      </div>
+    </div>
+
+    <!-- ================= バトル画面 ================= -->
+    <div id="stage">
+      <canvas id="game" width="960" height="640"></canvas>
+      <div id="killfeed"></div>
+
+      <!-- カウントダウン（game.js の startGame / updateCountdown）：
+           スタートを押してもいきなり戦闘は始まらず、ステージとキャラを
+           確認しながら 3・2・1・開戦 を待つ。開戦 からタイマーが動き出す -->
+      <div id="countdown" class="hidden">
+        <div class="cd-stage" id="cdStage">🌿 グリーン島</div>
+        <div class="cd-num" id="cdNum">3</div>
+        <div class="cd-char" id="cdChar">🏴‍☠️ キャプテン・ジャック で出航！</div>
+        <div class="cd-tip" id="cdTip"></div>
+        <div class="cd-ready">まもなくバトル開始… 移動の準備をしてね！</div>
+      </div>
+
+      <!-- HUD：HP／リロード／溜めゲージ（中身の更新は game.js）
+           ★ このパネルは「PCのときだけ」表示（今の見た目のまま）。
+             スマホ（タッチ操作）では丸ごと非表示（画面が狭いため）。
+             判定は input.js が html に付ける is-touch / is-pc クラスだけ
+             （game.css にメディアクエリの出し分けはない）。is-touch は
+             「主入力がタッチ・マウスが主入力でない・ホバー不可」の3条件が
+             そろった端末だけに付き、マウス／キー操作をすれば is-pc になる。
+             幅だけでは判定しないので、PCではウィンドウが狭くても出る。
+             その代わりリロード（弾）は game.js の drawEntity で
+             キャラのHPバーの真下に表示する。 -->
+      <div id="hud" class="hidden">
+        <div>
+          <div id="hpwrap">
+            <div class="hud-label-row">
+              <span id="pname">プレイヤー</span>
+              <span id="hptext">1000 / 1000</span>
+            </div>
+            <div class="bar"><i id="hpfill"></i></div>
+            <div id="regenline" class="regen-line full">💚 自動回復：満タン</div>
+          </div>
+
+          <div id="ammowrap">
+            <div class="hud-label-row">
+              <span>🔁 リロード</span>
+              <span id="ammotext">リロードなし</span>
+            </div>
+            <div class="pips" id="ammopips"></div>
+            <div class="bar"><i id="ammofill"></i></div>
+          </div>
+
+          <div id="chargewrap">
+            <div class="hud-label-row">
+              <span>💥 溜め攻撃</span>
+              <span id="chargetext">攻撃を長押しで溜める</span>
+            </div>
+            <div class="bar"><i id="chargefill"></i></div>
+          </div>
+        </div>
+
+        <div class="pill warn-pill">⚠️ 外側は毒ゾーン！円の中へ逃げろ</div>
+      </div>
+
+      <!-- タッチ操作（スマホ用：スティック＋攻撃ボタン／操作は input.js） -->
+      <div id="touch">
+        <div class="joy" id="joy"><i id="joyKnob"></i></div>
+        <div class="tbtns">
+          <button class="tbtn" id="atkBtn">⚔️<br>攻撃<small>長押しで溜め</small></button>
+        </div>
+      </div>
+
+      <!-- 結果画面（1位のときだけ game.js が is-victory を付けて派手な優勝演出：紙吹雪＋花火） -->
+      <div class="overlay hidden" id="endScreen">
+        <div class="victory-fx" id="victoryFx" aria-hidden="true"></div>
+        <div class="panel">
+          <div id="victoryBanner" class="hidden">👑 10人中 1位！ 👑</div>
+          <div id="endEmoji">🏆</div>
+          <h1 id="endTitle">優勝！</h1>
+          <p class="sub" id="endSub"></p>
+          <div id="resultStats">
+            <div><b id="rPlace">1位</b>順位</div>
+            <div><b id="rKills">0</b>キル</div>
+            <div><b id="rTime">0:00</b>生存時間</div>
+            <div><b id="rCoins">+0</b>獲得コイン🪙</div>
+          </div>
+          <button class="bigbtn" id="againBtn">🔁 もう一度遊ぶ</button>
+          <button class="ghost-btn" id="changeBtn">ロビーに戻る</button>
+        </div>
+      </div>
+    </div><!-- /#stage -->
+
+    <!-- ============================================================
+         待ち受けロビー（startScreen）
+         中は「部屋」に分かれている。部屋の切り替えは lobby.js の showRoom()
+           room-lobby … ロビー（待ち受け）
+           room-chars … キャラ部屋
+           room-how   … 作戦部屋（遊び方）
+           room-gacha … ガチャ部屋
+           room-crew  … 仲間部屋
+         ============================================================ -->
+    <div class="lobby" id="startScreen">
+
+      <!-- 部屋：ロビー（待ち受け） -->
+      <section class="room is-active" id="room-lobby">
+        <div class="lobby-top">
+          <div class="profile">
+            <div class="avatar">🏴‍☠️</div>
+            <div>
+              <b>キャプテン見習い</b>
+              <small>海賊団レベル 5 ・ ヨーホーホー！</small>
+            </div>
+          </div>
+          <div class="res">
+            <div class="pill">🏆 <b>1003</b></div>
+            <div class="pill">🪙 <b id="coinVal">494</b></div>
+            <div class="pill">💎 <b>162</b></div>
+            <div class="pill">💚 <b>31</b></div>
+          </div>
+          <button class="hamb" data-go="how" aria-label="遊び方">☰</button>
+        </div>
+
+        <div class="lobby-main">
+          <nav class="rail" aria-label="部屋メニュー">
+            <button class="rail-btn" data-go="chars"><span class="ic">🏴‍☠️</span>キャラ部屋</button>
+            <button class="rail-btn" data-go="gacha"><span class="ic">🎁</span>ガチャ</button>
+            <button class="rail-btn" data-go="crew"><span class="ic">🛒</span>ショップ<span class="badge">1</span></button>
+            <button class="rail-btn" data-go="crew"><span class="ic">👥</span>ソーシャル</button>
+            <button class="rail-btn" data-go="online"><span class="ic">🌐</span>オンライン</button>
+            <button class="rail-btn" data-go="how"><span class="ic">🗺️</span>作戦部屋</button>
+            <button class="rail-btn" data-go="settings"><span class="ic">⚙️</span>設定</button>
+          </nav>
+
+          <div class="hero-stage">
+            <div class="hero-badges">
+              <div class="hero-badge" id="heroTrophy"><small>トロフィー</small>🏆 165</div>
+              <div class="hero-badge" id="heroPower"><small>パワー</small>⚡ 4</div>
+            </div>
+            <div class="hero-figure" id="heroFigure" data-go="chars" role="button" tabindex="0" aria-label="キャラ選択画面（キャラ部屋）へ" title="タップでキャラ選択へ">
+              <div class="hero-body" id="heroBody"><span class="hero-emoji" id="heroEmoji">🏴‍☠️</span></div>
+              <div class="hero-weapon" id="heroWeapon">⚔️</div>
+            </div>
+            <div class="hero-shadow"></div>
+            <div class="hero-name" id="heroName" data-go="chars" role="button" aria-label="キャラ選択画面（キャラ部屋）へ">キャプテン・ジャック</div>
+            <div class="hero-quote" id="heroQuote"></div>
+            <div class="hero-change-hint" data-go="chars" role="button" aria-label="キャラ選択画面（キャラ部屋）へ">👆 キャラをタップでキャラ選択へ</div>
+          </div>
+
+          <aside class="rail">
+            <div class="chat-bubble">
+              <small>オンライン ・ スカリー</small>
+              船長、出航準備できたぜ！宝箱は俺に任せな！
+            </div>
+            <div>
+              <button class="crew-slot" data-go="crew" aria-label="仲間スロット">＋</button>
+              <div class="crew-label">仲間スロット（BOT）</div>
+            </div>
+            <div>
+              <button class="crew-slot" data-go="crew" aria-label="仲間スロット">＋</button>
+              <div class="crew-label">仲間スロット（BOT）</div>
+            </div>
+            <button class="create-btn" data-go="crew">⛵ フレンド船団<br>作成</button>
+          </aside>
+        </div>
+
+        <div class="lobby-bottom">
+          <div class="mini-cards">
+            <div class="mini-card">
+              <span class="ic">📦</span>宝箱 1/10
+              <div class="bar"><i class="fill-10"></i></div>
+            </div>
+            <div class="mini-card">
+              <span class="ic">💚</span>キューブ 90/100
+              <div class="bar"><i class="fill-90"></i></div>
+            </div>
+          </div>
+          <div class="event-card" id="eventInfo"></div>
+          <button class="play-btn" id="startBtn">プレイ<small>10人バトロワ ・ BOT対戦 ／ PCは Space でも開始</small></button>
+        </div>
+      </section>
+
+      <!-- 部屋：キャラ部屋（中身の生成は lobby.js の renderChars()） -->
+      <section class="room" id="room-chars">
+        <div class="room-head">
+          <h2>🏴‍☠️ キャラ部屋</h2>
+          <p>出航するキャラを選ぼう。性能の違いを比べてみてね。</p>
+          <button class="back-btn" data-go="lobby">← ロビーに戻る</button>
+        </div>
+        <div class="room-body">
+          <div class="chars-toolbar">
+            <label class="sort-label">🔀 並び替え
+              <select id="charSort" aria-label="キャラの並び替え">
+                <option value="default">今の並び</option>
+                <option value="name">名前順</option>
+                <option value="added">追加された順</option>
+                <option value="hp">HPが高い順</option>
+                <option value="dmg">攻撃が高い順</option>
+                <option value="speed">足が速い順</option>
+              </select>
+            </label>
+            <div class="view-toggle" role="group" aria-label="表示の切り替え">
+              <button type="button" class="view-btn" data-view="card">🗂️ カード</button>
+              <button type="button" class="view-btn" data-view="compact">▦ コンパクト</button>
+              <button type="button" class="view-btn" data-view="list">☰ リスト</button>
+            </div>
+          </div>
+          <div class="chars" id="charList"></div>
+          <div class="char-detail" id="charDetail"></div>
+          <button class="bigbtn room-action-btn" id="toBattleBtn">▶ このキャラで出航！</button>
+        </div>
+      </section>
+
+      <!-- 部屋：作戦部屋（遊び方） -->
+      <section class="room" id="room-how">
+        <div class="room-head">
+          <h2>🗺️ 作戦部屋</h2>
+          <p>ルールと操作はここに集めたよ。</p>
+          <button class="back-btn" data-go="lobby">← ロビーに戻る</button>
+        </div>
+        <div class="room-body">
+          <div class="cards2">
+
+            <div class="info-card">
+              <h3>🏆 勝ち方</h3>
+              <ul>
+                <li>10人（あなた＋BOT9人）で戦い、最後の1人になれば優勝（クリア）</li>
+                <li>自分のキャラは、足元の金色の楕円マーカーと名前の上の小さな▼で見分けられるよ</li>
+                <li>スタートを押してもいきなりは始まらないよ。ステージとキャラが表示されて「3・2・1・開戦」のカウントダウンのあとに開始するよ（タイマーも「開戦」から数える）</li>
+                <li>参加者は最初から10人だけ。倒れたBOTは復活しないし、途中で敵が増えることもないよ。残り人数が減っていって、他の9人全員がいなくなったらクリア！</li>
+                <li>宝箱を壊すと💚パワーキューブが出る（攻撃力+9％＆最大HP+40／拾うとHP+100回復）</li>
+                <li>敵を倒してもキューブが2個落ちる</li>
+                <li>毒ゾーンは12秒後から縮む。外のダメージは序盤は毎秒35、終盤は毎秒75まで強くなる</li>
+                <li>ステージは全4種からランダム（グリーン島／マグマ島／海賊船デッキ／フロスト島）。詳しくは下の「ステージ」のカードを見てね</li>
+              </ul>
+            </div>
+
+            <div class="info-card">
+              <h3>🗺️ ステージ（全4種・ランダム）</h3>
+              <ul>
+                <li>ステージはバトルごとに<b>ランダム</b>で決まるよ（同じステージは2回続かない）。どのステージかは開始時のお知らせと、画面上のバーに出るよ</li>
+                <li>🌿 <b>グリーン島</b>：緑の草原の島。木の幹と宝箱が盾になる、いちばんスタンダードなステージ</li>
+                <li>🌋 <b>マグマ島</b>：黒い岩山の島。マグマ池に入ると<b>毎秒55ダメージ</b>で回復もできない！黒岩と枯れ木を盾に、マグマに落ちないように戦おう</li>
+                <li>🚢 <b>海賊船デッキ</b>：船の中の板張り甲板。太いマスト（柱）とタルが障害物で、弾も止めてくれるよ</li>
+                <li>❄️ <b>フロスト島</b>：雪と氷の島。氷の池の上はツルツルして<b>足が約1.3倍速く</b>なる。氷ブロックと雪の松を盾にしよう</li>
+                <li>障害物（木・岩・マスト・タル・氷ブロックなど）は全部、通れなくて弾も止めるよ。うまく盾にして戦おう（例外：幽霊の死神はいつでも、幽霊・キャプテンは幽霊化中だけすり抜けられる）</li>
+              </ul>
+            </div>
+
+            <div class="info-card">
+              <h3>💚 自動回復</h3>
+              <ul>
+                <li>攻撃もせず、攻撃もされずに<b>3秒</b>たつと、HPが少しずつ回復し始める（毎秒、最大HPの6％）</li>
+                <li>攻撃したり、ダメージを受けたりすると、3秒の数え直しになる。戦いながらは回復できないよ</li>
+                <li>毒ゾーンの中では回復しない。まず円の中に戻ろう</li>
+                <li>回復中はキャラの周りに緑のリングと✚が出て、HPバーの下にも「回復中」と出るよ</li>
+                <li>やばくなったら無理に戦わず、逃げて立て直すのが大事。BOTも残りHPが少ないと逃げて回復しようとするよ</li>
+              </ul>
+            </div>
+
+            <div class="info-card">
+              <h3>⚖️ バランスの考え方</h3>
+              <ul>
+                <li>ジャック（近接）：単発240で一番痛いが射程は一番短い。HP1080は中くらい。飛び込めるかどうかが勝負</li>
+                <li>ルビー（遠距離）：射程340・最速で距離を保てるが、HP900で一番柔らかく、倒し切るには8発前後かかる</li>
+                <li>ドン（タンク）：HP1380で一番硬く爆発は範囲攻撃。爆弾は敵に当たった瞬間に爆発するよ。ただし敵に近すぎると自分も爆風でダメージを受けるので、距離を取って投げよう。一番遅く、連射とリロードも一番遅い</li>
+                <li>ヴェラー（炎玉）：HP1150・速さ172。モードが2つある：ショット型はタップの炎玉1発（140）で距離を保てる（弾3発／リロード1発1.0秒と遅め）。螺旋型はタップ攻撃がなく弾倉は1発だけ、ゲージ満タンで離す螺旋フレイムが決まれば大きい。どちらのモードも炎玉3個はゲージ満タンで出現して近距離を守ってくれて、溜めている間も足は遅くならない</li>
+                <li>ブルーノ（格闘）：HP1120・速さ176。素手の連打パンチは1発130と軽いが間隔0.27秒で一番速く、射程102はジャックより少し長い。溜めの足技キックは弧を描く軌道でリーチ69・360ダメージ、キック中だけ遠距離攻撃を脚全体で跳ね返せる（ドンの爆弾は例外で爆発する）。溜めている間も足は遅くならない。遠距離攻撃は一切ないので、足とキックの間合いで詰めるのが勝負</li>
+                <li>グスタフ（重砲）：HP1020・速さ152。右腕の大砲から撃つ砲弾は1発215と重く、当たると小さく炸裂して周りも巻き込む。ただし弾は2発だけ・リロード1発1.15秒と重く、足も大砲の分だけ遅め。溜めの散弾は近距離で全部当てれば大ダメージだが、離れると当たる数が減る。当てる場所と距離が勝負</li>
+                <li>ボニー（散弾）：HP1050・速さ162。散弾6発（1発65）はゼロ距離で全部当たれば390と全キャラ最高火力だが、離れるほど散らばって当たる数が減り、1発の威力も射程端で約38%まで落ちる（遠距離の威力は今まで通り）。弾2発・リロード0.95秒。溜めは攻撃ではなく高速ダッシュ（ジャックと同じ仕組みで約100px・ダメージなし）で、詰めるのも逃げるのもこれ次第。溜め中も足は遅くならない</li>
+                <li>バート（火吹き）：HP980・速さ166。押している間ずっと噴くファイアブレスは毎秒約290ダメージ・射程175の扇形で、近距離の集団に強い。ただし連続で吐けるのは3秒までで、息切れすると回復まで無防備に近くなる。タップの一吹きでも息を0.35秒分使うので、連打しても息が続かず無限には打てない。HPは一番低い部類なので、3秒で焼き切るか引くかの見極めが勝負</li>
+                <li>死神（幽霊）：HP1000・速さ170。障害物をすり抜けて移動できるのが最大の強みで、地形を無視して近づいたり逃げたりできる。大鎌の弧斬りは射程150で近接最長・1発210と近接最強クラス。ただし近接なのに弾倉3発があり、撃ち切るとリロードが要る。溜めは地面に潜って向いている方向へ瞬間移動するテレポート（ダメージなし・弾も使わない）で、溜め中も足は遅くならない</li>
+                <li>幽霊・キャプテン（幽霊）：HP950・速さ178。死んだ元キャプテンで、片手の海賊サーベルは1発190・弾倉4発。長押しの幽霊化は最大3.5秒だけ透明になってあらゆる攻撃がすり抜け、障害物も通り抜けられる。長押し中は少しだけ足が遅くなる（他のキャラほどではない）。幽霊化の使いどころと、使い切った後の回復待ちの隙が勝負</li>
+                <li>誰か1人がずっと強い、にならないよう「火力×硬さ×速さ×射程」の合計がそろうように調整してあるよ</li>
+              </ul>
+            </div>
+
+            <div class="info-card">
+              <h3>🔥 フレイレ・ヴェラー（炎玉キャラ）― 案1と案2の両方を採用！</h3>
+              <ul>
+                <li><b>案1と案2の両方入り！</b> ヴェラーを選ぶとき、キャラ部屋の詳細で<b>どちらのモードで戦うか選べる</b>よ。気分や作戦で切り替えよう</li>
+                <li><b>案1「螺旋フレイム型」</b>：タップ攻撃はなし。ゲージ満タンで炎玉3個が出現し、そのまま離すと3個が<b>回転する隊形のまま</b>飛んでいく大技「トリプル螺旋フレイム」（貫通・1個150ダメージ、全部当たれば450）。<b>弾倉は1発だけ</b>：撃ったらリロードしてから次が撃てるよ</li>
+                <li><b>案2「炎玉ショット型」</b>：攻撃ボタンを<b>タップ＝炎玉を1個撃つ</b>通常攻撃（140ダメージ／射程320／弾3発）。連射が強すぎないよう、リロードは1発1.0秒・連射間隔0.45秒と少し遅めだよ。ゲージ満タンで炎玉3個も出現するけど、離しても炎玉は飛ばないよ</li>
+                <li><b>大事な共通ルール：炎玉3個は「長押しゲージが満タン（0.9秒）になってから」出現する</b>よ。長押しした瞬間には出ないので、ゲージがたまるまで待ってね</li>
+                <li>出現中の炎玉3個は周りをぐるぐる回り、触れた敵に<b>150ダメージ</b>（同じ敵には0.45秒に1回まで。複数人には同時に当たる）。宝箱も焼けるよ。敵の矢・貫通ボルト・爆弾などの<b>飛び道具が炎玉に当たると消える（ガード）</b>のも共通だよ</li>
+                <li><b>BOTのヴェラーはモードがランダム</b>だよ。だからヴェラー同士の戦いでも、螺旋型とショット型で違う能力の戦いになるよ。頭上の名前の横に「🌀螺旋型／🔥ショット型」が出るので見分けてね</li>
+                <li>リロードはモードで違うよ：螺旋型は<b>弾1発だけ／1発0.7秒</b>、ショット型は<b>弾3発／1発1.0秒・連射間隔0.45秒</b>。そしてヴェラーはどちらのモードも<b>溜めている間は移動が遅くならず、通常の速さのまま</b>だよ（他のキャラは溜め中少し遅くなる）</li>
+              </ul>
+            </div>
+
+            <div class="info-card">
+              <h3>🥊 ファイター・ブルーノ（格闘キャラ）― 新キャラ！</h3>
+              <ul>
+                <li><b>素手の格闘家</b>だよ。緑の道着に黄色いハチマキ、赤いグローブが目印。ジャックと同じ近接で、<b>リロードはなし</b></li>
+                <li><b>通常攻撃は連打パンチ</b>：右手と左手が<b>交互</b>に出るよ（オラオラ！）。出した側の拳が前に伸びるので、どっちの手か見て分かるよ。1発<b>130ダメージ</b>・間隔<b>0.27秒</b>と手数は全キャラで一番多く、射程<b>102</b>はジャックの剣（95）より少し長いよ</li>
+                <li><b>長押しの溜め攻撃は足技「爆裂旋風キック」</b>：<b>リーチ69</b>（今までの半分。脚が長すぎて不自然だったので短くした）で<b>360ダメージ</b>。直線じゃなく<b>弧を描く軌道</b>で、足が狙いの左右約43度ずつ（合計約86度）を<b>一瞬で</b>振り抜けるよ。当たり判定は足先だけじゃなく<b>脚全体（付け根からつま先まで）</b>にあるよ。少し踏み込んで蹴るよ</li>
+                <li><b>キック中だけの特別ルール：遠距離攻撃を跳ね返せる！</b> 振り抜ける<b>脚のどこか</b>に触れた矢・貫通ボルト・炎玉・螺旋フレイムは跳ね返って、撃った相手にそのまま飛んでいくよ（足先で合わせなくても返せるよ）。タイミングよく蹴れば遠距離キャラへのカウンターになるよ</li>
+                <li><b>ただしボマー・ドンの爆弾だけは例外</b>：通常の爆弾も特大メガボムも跳ね返せず、足に触れた瞬間にその場で<b>爆発</b>するよ。爆風で自分もダメージを受けるので、ドン相手にキックで跳ね返そうとするのは危険だよ</li>
+                <li>ブルーノもヴェラーと同じく、<b>溜めている間は足が遅くならず通常の速さ（176）のまま</b>だよ。溜めながら間合いを詰められるよ</li>
+                <li>性能は HP<b>1120</b>（ジャックより少し硬い）・速さ<b>176</b>（ルビーに次ぐ速さ）。弱点は遠距離攻撃が一切ないことと、1発が軽いこと。張り付いて殴り続け、離れた敵にはキックのリーチで詰めよう</li>
+                <li>BOTのブルーノも同じだよ：交互パンチで連打してきて、キックの間合いに入ると溜めて蹴ってくるよ</li>
+              </ul>
+            </div>
+
+            <div class="info-card">
+              <h3>💥 キャノン・グスタフ（大砲腕キャラ）― 新キャラ！</h3>
+              <ul>
+                <li><b>右腕がそのまま大砲</b>になった砲撃手だよ。黒い三角帽子に眼帯、紺のコートが目印。左腕は普通の腕で、大砲は右腕だけだよ</li>
+                <li><b>通常攻撃は重い砲弾</b>：真っすぐ速く飛ぶ砲弾で1発<b>215ダメージ</b>。当たると<b>小さく炸裂</b>して、着弾点の周りの敵や宝箱も巻き込むよ（ドンの爆弾より範囲は小さめ）。近すぎる相手に撃つと自分も爆風を食らうことがあるので距離に注意</li>
+                <li><b>弾は2発だけ／リロードは1発1.15秒</b>と重め。撃ち終わるたびに隙ができるので、外さないことが大事だよ</li>
+                <li><b>長押しの溜め攻撃は「ブロードサイド散弾」</b>：破片弾<b>5発を扇形</b>に同時発射するよ。1発<b>115ダメージ</b>で、近距離で全部当てれば<b>575</b>の大ダメージ。離れるほど当たる数が減るので、近づいてから撃つのが決め手だよ。散弾も弾を1発使うよ</li>
+                <li>性能は HP<b>1020</b>・速さ<b>152</b>（大砲が重くて遅め。ドンよりは速い）。射程<b>305</b>はルビーに次ぐ長さだよ</li>
+                <li>弱点は足の遅さとリロードの重さ。距離を保って重い一発を当て、詰められたら散弾で押し返そう</li>
+                <li>BOTのグスタフも同じだよ：重い砲弾を撃ってきて、近づくと溜めて散弾を撃ってくるよ</li>
+              </ul>
+            </div>
+
+            <div class="info-card">
+              <h3>🔫 ブラスト・ボニー（ショットガン）― 新キャラ！</h3>
+              <ul>
+                <li><b>ショットガン（ブランダーバス）使い</b>だよ。紫の羽帽子と散弾ベルトが目印</li>
+                <li><b>通常攻撃は散弾6発を扇形に同時発射</b>（1発65ダメージ）。<b>離れるほどダメージが低く、近づくほど火力が上がる</b>：近いほど散弾が多く当たる上に、1発の威力自体も距離で減衰する（ゼロ距離＝100%、射程端＝約38%）。<b>ゼロ距離で全部当てれば390ダメージと最高火力</b>だよ。近距離の火力を上げた分、遠距離の威力は今まで通りにしてあるよ</li>
+                <li><b>弾は2発／リロードは1発0.95秒</b>。外すと隙が大きいので、近づいてから撃とう</li>
+                <li><b>長押しの溜め攻撃は「ブリンクステップ」</b>：ジャックのダッシュ斬りと同じ<b>高速ダッシュ</b>の移動技で、距離は<b>ジャックの約3分の1（約100px）</b>。しかも<b>敵とぶつかってもダメージは与えられない</b>（通り抜けても無害）。弾も消費しないよ。詰める・逃げる・毒ゾーンから戻るための技だよ</li>
+                <li>ボニーもヴェラーやブルーノと同じく、<b>溜めている間は足が遅くならず通常の速さ（162）のまま</b>だよ</li>
+                <li>性能は HP<b>1050</b>・速さ<b>162</b>・射程<b>215</b>と短め。弱点は距離が開くと一気に弱くなること。ブリンクで間合いを管理しよう</li>
+                <li>BOTのボニーも同じだよ：近づいて散弾を撃ち、溜めるとブリンクで一気に詰めてくるよ</li>
+              </ul>
+            </div>
+
+            <div class="info-card">
+              <h3>🍾 火吹き・バート（ファイアブレス）― 新キャラ！</h3>
+              <ul>
+                <li><b>片手にラム酒の瓶を持った火吹き男</b>だよ。ティール色のバンダナと金の耳輪、緑の酒瓶が目印。口から火を吐いて攻撃するよ</li>
+                <li><b>通常攻撃は「ファイアブレス」</b>：攻撃ボタンを<b>押している間ずっと火を噴き続ける</b>よ。射程<b>175</b>の扇形に<b>毎秒約290ダメージ</b>。狙いはオートエイムで、吐いている間は少しゆっくり（0.7倍）歩けるよ。障害物の陰の相手は焼けないよ</li>
+                <li><b>ただし連続で吐けるのは3秒まで</b>（息＝燃料）。息ゲージは頭上のHPバーの下（オレンジ）と、PCでは左下パネルに出るよ</li>
+                <li><b>タップの一吹きでも息を0.35秒分使う</b>よ。だからボタンを連打しても息がどんどん減って、息切れすれば止まる。<b>連打で無限に打つことはできない</b>よ</li>
+                <li><b>息が切れると「息切れ」になってしばらく吐けない</b>よ。ボタンを離して息継ぎすると毎秒0.9秒分ずつ回復し、1.2秒分まで戻ればまた吐けるよ。満タンまで待たなくても大丈夫だけど、短い息で挑むとすぐ切れるので注意</li>
+                <li><b>溜め攻撃はない</b>よ。長押し＝吐き続けること自体が攻撃。タップすれば短い一吹きになるよ</li>
+                <li>性能は HP<b>980</b>（一番低い部類）・速さ<b>166</b>。弱点は息切れ中の隙と射程の短さ。3秒で焼き切るか、切れる前に引くかが見極めどころ</li>
+                <li>BOTのバートも同じだよ：近づいて火を噴き続け、息が切れると離れて息継ぎしようとするよ</li>
+              </ul>
+            </div>
+
+            <div class="info-card">
+              <h3>👻 幽霊・死神（大鎌＆すり抜け）― 新キャラ！</h3>
+              <ul>
+                <li><b>海に沈んだ船乗りの幽霊</b>だよ。深い闇色のフードに水色に光る目、大きな鎌が目印</li>
+                <li><b>最大の特徴は「すり抜け」</b>：幽霊の体なので、障害物（木・岩・マスト・タル・氷ブロック）を<b>すり抜けて移動できる</b>よ。壁の向こうの敵に一直線に近づいたり、追われても障害物を抜けて逃げたりできる。ただし宝箱はすり抜けられないよ</li>
+                <li><b>通常攻撃は大鎌の弧斬り</b>：前方の広い扇形を薙ぐよ。1発<b>210ダメージ</b>・間隔<b>0.52秒</b>、射程<b>150</b>は近接キャラで一番長い。ただし近接なのに<b>弾倉3発</b>があって、撃ち切ると1発<b>0.9秒</b>ずつリロードが要るよ（火力と範囲を上げた代わりの制約だよ）</li>
+                <li><b>長押しの溜め攻撃は「冥府潜りテレポート」</b>：地面に<b>潜って</b>、<b>向いている方向</b>へ約<b>260px</b>先の地面から<b>姿を現す瞬間移動</b>だよ。行き先はオートエイムじゃなくて本人の向きで決まるよ。<b>溜めている間は、ワープ先にゴーストの影とマーカーが表示される</b>ので、どの辺に現れるか見てから離せるよ。潜っている間は攻撃が当たらず、ダメージも与えない純粋な移動技で、弾も消費しないよ。溜めている間も足は遅くならないよ</li>
+                <li>性能は HP<b>1000</b>・速さ<b>170</b>。弱点は弾倉が切れたときの隙。地形を無視して近づき、テレポートで間合いを詰めたり逃げたりしよう</li>
+                <li>BOTの死神も同じだよ：障害物をすり抜けて近づいてきて、間合いが開くと溜めてテレポートで一気に詰めてくるよ</li>
+              </ul>
+            </div>
+
+            <div class="info-card">
+              <h3>👻 幽霊・キャプテン（サーベル＆幽霊化）― 新キャラ！</h3>
+              <ul>
+                <li><b>死んだ元キャプテンの幽霊</b>だよ。紺の船長帽（二角帽）に金の縁取り、白い口ひげと横髪が目印。片手には海賊サーベルを持っているよ</li>
+                <li><b>通常攻撃はサーベルの斬撃</b>：1発<b>190ダメージ</b>・間隔<b>0.48秒</b>・射程<b>105</b>。<b>弾倉4発</b>があって、撃ち切ると1発<b>1.05秒</b>ずつリロードが要るよ</li>
+                <li><b>長押しで「幽霊化」</b>：ゲージが満タン（0.6秒）になると体が<b>透明</b>になって、<b>あらゆる攻撃がすり抜ける</b>（矢も爆弾も爆風も当たらない）し、<b>障害物も通り抜けられる</b>よ。幽霊化中は自分も攻撃できないよ</li>
+                <li><b>幽霊化は最大3.5秒まで</b>。残り時間は頭上のHPバーの下（水色のゲージ）と、PCでは左下パネルに出るよ。使い切ると「回復待ち」になって、ゲージが1.2秒分まで戻るまで幽霊化できないよ（回復は毎秒0.8秒分）。途中で離せば早めに終われるよ</li>
+                <li><b>長押し中は足が少しだけ遅くなる</b>（0.65倍）。他のキャラの長押し中の減速（0.45倍）ほど遅くはならないよ</li>
+                <li>性能は HP<b>950</b>・速さ<b>178</b>（ルビーに次ぐ速さ）。弱点は幽霊化が切れた直後の隙と、普段は障害物を通れないこと。幽霊化で壁を抜けて奇襲したり、ピンチにすり抜けて逃げたりしよう</li>
+                <li>BOTの幽霊・キャプテンも同じだよ：幽霊化して近づいてきて、間合いに入ると解除して斬ってくる。ピンチでは幽霊のまま逃げるよ</li>
+              </ul>
+            </div>
+
+            <div class="info-card">
+              <h3>🖥️ パソコン操作</h3>
+              <ul>
+                <li>左下のHP／自動回復／リロード／溜め攻撃パネルは、PCのときだけ表示されるよ（スマホでは出ないよ）</li>
+                <li><b>ロビー（試合前）と結果画面では <kbd>Space</kbd> を押すと試合が始まるよ</b>（PCのときだけ。カウントダウンから始まるよ）</li>
+                <li><kbd>W A S D</kbd> ／ 矢印キーで移動（キャラは進む方向を向く）</li>
+                <li>バトル中の <kbd>Space</kbd> を押して離すと通常攻撃。狙いはオートエイムで、射程内の一番近い敵を自動で狙うよ</li>
+                <li><kbd>Space</kbd> 長押しで溜めて、離すと溜め攻撃が発動！（溜め攻撃もオートエイム）</li>
+                <li>ヴェラーは選んだモードで変わるよ：ショット型は <kbd>Space</kbd> タップで炎玉1発。螺旋型はタップでは何も出ず、満タンまで長押しして離すと螺旋フレイム。どちらのモードも炎玉3個はゲージ満タンで出現するよ</li>
+                <li>ブルーノは <kbd>Space</kbd> を連打すると右・左の交互パンチ、長押しして離すと足技キックだよ</li>
+                <li>ボニーは <kbd>Space</kbd> タップで散弾、長押しして離すとブリンクステップ（高速ダッシュ・ダメージなし）だよ</li>
+                <li>バートは <kbd>Space</kbd> を押している間ずっと火を噴くよ。離すと止まる。連続3秒までで、タップの一吹きでも息を0.35秒分使うから連打はできないよ。息が切れたら一度離して息継ぎしてね</li>
+                <li>死神は <kbd>Space</kbd> を押して離すと大鎌の弧斬り、長押しして離すと地面に潜って向いている方向へテレポート。障害物はいつでもすり抜けられるよ</li>
+                <li>幽霊・キャプテンは <kbd>Space</kbd> を押して離すとサーベル斬り、長押しで幽霊化（最大3.5秒・離すと解除）。幽霊化中だけ障害物もすり抜けられるよ</li>
+              </ul>
+            </div>
+
+            <div class="info-card">
+              <h3>📱 スマホ操作</h3>
+              <ul>
+                <li><b>スマホでは横画面専用</b>だよ。縦向きのときは「画面を横向きにしてください」の案内が全画面に出て、端末を横に回すとそのまま遊べるよ（PCでは縦横どちらでも遊べるよ）</li>
+                <li>左スティックで移動（キャラは進む方向を向く）</li>
+                <li>右の「攻撃」ボタンをタップで通常攻撃（オートエイム：一番近い敵を自動で狙う）</li>
+                <li>「攻撃」ボタンを長押しして離すと溜め攻撃</li>
+                <li>ヴェラーも攻撃ボタンを使うよ：ショット型はタップで炎玉1発、螺旋型は満タンまで長押しして離すと螺旋フレイム。炎玉3個はゲージ満タンで出現してガードになるよ</li>
+                <li>ブルーノは攻撃ボタンを連打すると右・左の交互パンチ、長押しして離すと足技キックだよ</li>
+                <li>ボニーは攻撃ボタンタップで散弾、長押しして離すとブリンクステップ（高速ダッシュ・ダメージなし）だよ</li>
+                <li>バートは攻撃ボタンを押している間ずっと火を噴くよ。離すと止まる。タップの一吹きでも息を0.35秒分使うから連打はできないよ。息の残りはHPバーの下のオレンジのゲージで確認してね</li>
+                <li>死神は攻撃ボタンタップで大鎌の弧斬り、長押しして離すと地面に潜って向いている方向へテレポート。障害物はいつでもすり抜けられるよ</li>
+                <li>幽霊・キャプテンは攻撃ボタンタップでサーベル斬り、長押しで幽霊化（最大3.5秒・離すと解除）。幽霊化の残りはHPバーの下の水色ゲージで確認してね</li>
+                <li>スマホでは画面を広く使うため、左下のHP／リロード／溜めパネルは出ないよ。その代わり弾（リロード）はキャラのHPバーの真下に出るよ</li>
+                <li>スティックと攻撃ボタンの位置は、ロビーの「⚙️ 設定」で左右の入れ替え・上下・端からの距離・大きさを変えられるよ</li>
+              </ul>
+            </div>
+
+            <div class="info-card">
+              <h3>💥 溜め攻撃</h3>
+              <ul>
+                <li>攻撃ボタンを長押しするとゲージがたまる。満タンで離すと発動</li>
+                <li>ゲージはキャラの周りをぐるっと回る円で表示されるよ。たまるほど橙→金→白金に熱く光って、目盛りが1つずつ点灯し、火花がキャラに吸い込まれていくよ。満タンになると金色に強く光って、脈打つ輪とキラキラが回るので「今だ！」が一目で分かるよ</li>
+                <li>ジャック＝疾風ダッシュ斬り（数メートルを高速で駆け抜け、通り道の敵にダメージ）</li>
+                <li>ルビー＝貫通パワーボルト／ドン＝特大メガボム</li>
+                <li>ブルーノ＝爆裂旋風キック（足技。リーチ69で360ダメージ。直線ではなく弧を描く軌道で素早く振り抜け、当たり判定は脚全体。キック中だけ遠距離攻撃を脚全体で跳ね返せるが、ドンの爆弾だけは跳ね返せず爆発する。少し踏み込んで蹴る）</li>
+                <li>グスタフ＝ブロードサイド散弾（破片弾5発を扇形に同時発射。1発115ダメージ、近距離で全部当てれば575。離れるほど当たる数が減る。弾を1発使う）</li>
+                <li>ヴェラー＝モードで違う：螺旋型はトリプル螺旋フレイム（ゲージ満タンで出現した炎玉3個が、離すと回転する隊形のまま飛んでいく。貫通・1個150ダメージ）。ショット型は離しても飛ばず、炎玉3個の出現（接触＋ガード）そのものが溜めの成果だよ</li>
+                <li>ボニー＝ブリンクステップ（約100pxの高速ダッシュ。ジャックのダッシュと同じ仕組みで距離は約1/3、敵とぶつかってもダメージは与えない。弾は消費しない）</li>
+                <li>死神＝冥府潜りテレポート（地面に潜って、向いている方向へ約260px先の地面から現れる瞬間移動。ダメージなし・弾は消費しない。潜っている間は攻撃が当たらない。溜めている間はワープ先にゴーストの影のマーカーが出るので、行き先を見てから離せる）</li>
+                <li>幽霊・キャプテン＝幽霊化（溜め攻撃ではなく、長押しで発動する特殊状態。最大3.5秒、透明になってあらゆる攻撃がすり抜け、障害物も通り抜けられる。離すか時間切れで解除）</li>
+                <li>バート＝溜め攻撃はない。長押ししている間ずっと火を噴き続ける「ファイアブレス」そのものが攻撃（連続3秒まで）</li>
+                <li>溜めている間は移動が少し遅くなる。短く押せば通常攻撃になる。<b>ただしヴェラーとブルーノとボニーと死神は例外で、溜め中も通常の速さのまま</b>だよ。幽霊・キャプテンは減速するけど緩やか（0.65倍）だよ</li>
+              </ul>
+            </div>
+
+            <div class="info-card">
+              <h3>🔁 リロード</h3>
+              <ul>
+                <li>遠距離キャラは撃ち続けられない。弾が切れると1発ずつリロードする</li>
+                <li>溜め攻撃（貫通パワーボルト／特大メガボム／螺旋フレイム）も弾を1発使うよ。弾がないときは溜めても発動しないので、残りの弾を見てから溜めよう</li>
+                <li>ルビー＝3発／1発0.85秒（連射間隔0.35秒）、ドン＝2発／1発1.05秒（連射間隔0.82秒と一番遅い）</li>
+                <li>ヴェラー＝モードで違う：螺旋型は弾1発だけ／1発0.7秒（螺旋フレイムがその1発を使う）、ショット型は3発／1発1.0秒（連射間隔0.45秒）。ショット型の連射が強すぎたので、リロードと連射を少し遅くしたよ</li>
+                <li>グスタフ＝2発／1発1.15秒（連射間隔0.62秒）。砲弾が重い分、一番じっくり装填するよ。散弾（溜め攻撃）も弾を1発使うよ</li>
+                <li>ボニー＝2発／1発0.95秒（連射間隔0.72秒）。溜めのブリンクステップは弾を使わないよ</li>
+                <li>バート＝リロードではなく「息」。連続3秒まで吐けて、離している間に回復するよ。タップの一吹きでも息を0.35秒分使うので、連打しても無限には打てないよ</li>
+                <li>死神＝3発／1発0.9秒（連射間隔0.52秒）。近接なのに弾倉がある特別なキャラで、溜めのテレポートは弾を使わないよ</li>
+                <li>幽霊・キャプテン＝4発／1発1.05秒（連射間隔0.48秒）。長押しの幽霊化は弾ではなく「幽霊化ゲージ」を使うよ</li>
+                <li>ジャックとブルーノは近接なのでリロードなし。ジャックは剣を振り放題、ブルーノは拳を出し放題！その代わり射程は短いよ（ブルーノのキックはリーチ69だよ）</li>
+                <li>弾の残りはキャラの頭上、HPバーの真下にも出るよ（青いマスが残りの弾、薄いマスはリロード中）。スマホでもここで確認できるよ</li>
+              </ul>
+            </div>
+
+            <div class="info-card">
+              <h3>👟 足の速さ</h3>
+              <ul>
+                <li>足の速さはキャラの重さと強さで違うよ。全体に少しゆっくりに調整済み</li>
+                <li>ルビー＝182（最速・軽快。HPが低い分、足で逃げて撃てる）</li>
+                <li>ジャック＝168（中速。近接で近づく必要はあるけど、速すぎると強すぎるので中くらい）</li>
+                <li>ヴェラー＝172（速め。ジャックより少し速い。溜めている間も遅くならないので、溜めながら近づいたり距離を取り直したりできる）</li>
+                <li>ブルーノ＝176（速め・俊敏。ルビーに次ぐ速さ。溜めている間も遅くならないので、溜めながら間合いを詰めてキックを狙える）</li>
+                <li>グスタフ＝152（遅め・重量級。大砲が重い分、ドンよりは速いが近づかれると逃げにくい）</li>
+                <li>ボニー＝162（中速。近づく必要がある分ジャックより少し遅め。溜めている間も遅くならず通常の速さのまま）</li>
+                <li>バート＝166（中速。火を吐いている間は少しゆっくり0.7倍で歩ける）</li>
+                <li>死神＝170（速め。幽霊なのでふわりと速く、障害物もすり抜けられる。溜めている間も遅くならない）</li>
+                <li>幽霊・キャプテン＝178（速め。ルビーに次ぐ速さ。長押し中は少しだけ遅くなるが、他のキャラほどではない）</li>
+                <li>ドン＝138（最遅・重量級。HPと範囲攻撃が強い分、足は遅い）</li>
+              </ul>
+            </div>
+
+            <div class="info-card">
+              <h3>🔊 効果音</h3>
+              <ul>
+                <li>攻撃・爆発・被弾・倒したとき・パワーキューブ取得・自動回復の開始・溜め攻撃の準備完了など、戦いの節目に効果音が鳴るよ。キャラごとに音も違うよ（剣の風切り／矢／爆弾／炎／大砲など）</li>
+                <li>音は複数の音を重ねて作ってあるよ。たとえば爆発は「破裂→低音→轟き」の3段、大砲は金属音と地響き、クロスボウは弦の音と矢の風切り。同じ音でも毎回ほんの少し音程が変わるので、連打しても機械っぽくならないよ</li>
+                <li><b>溜めている間は専用の音が鳴り続けて、ゲージがたまるほど音程が上がっていく</b>よ。満タンになると震えるような音＋「ピキーン！」の合図で、見なくても準備完了が分かるよ</li>
+                <li>カウントダウンの「3・2・1」と「開戦」、優勝・敗北のときも音で分かるよ</li>
+                <li>遠くのBOTの音は小さめに鳴るので、近くの戦いほどよく聞こえるよ</li>
+                <li>消したいときや音量を変えたいときは、ロビーの「⚙️ 設定」か、バトル画面上の「🔊 音ON」ボタンから切り替えられるよ</li>
+                <li>音は最初のタップやキー操作のあとから鳴り始めるよ（ブラウザの決まりで、操作前に自動で鳴らすことはできないんだ）</li>
+              </ul>
+            </div>
+
+            <div class="info-card">
+              <h3>🌐 オンライン対戦（友達と）</h3>
+              <ul>
+                <li>ロビーの「🌐 オンライン」部屋から、<b>部屋を作る</b>（ルームコード6文字が出る）／<b>部屋に入る</b>（コードを入れる）で、離れた友達と対戦できるよ</li>
+                <li>対戦には Cloudflare の対戦サーバー（Workers + Durable Objects）が要るよ。初回だけ、オンライン部屋にあるサーバーコード（worker.js）をダウンロードして Cloudflare にデプロイし、出た URL を全員が設定してね。言語は今と同じ JavaScript で、無料枠で始められるよ</li>
+                <li>ホストが「バトル開始」を押すと全員同時にカウントダウンが始まるよ。バトルは10人制で、<b>集まった友達以外の枠はBOT</b>が入るよ</li>
+                <li>バトルの進行はホストの端末が計算して、サーバー経由で全員に同期されるよ。ゲストが途中で抜けたら、そのキャラはBOTが引き継ぐよ。<b>ホストが抜けると試合は終了</b>するので、ホストは最後までいてね</li>
+                <li>部屋に入れるのはホスト＋7人まで。バトル中の部屋には入れないよ</li>
+              </ul>
+            </div>
+
+            <div class="info-card">
+              <h3>🎁 ガチャ</h3>
+              <ul>
+                <li>ロビーの「ガチャ」から、コインで宝箱ガチャが回せる（1回🪙100／10連🪙900）</li>
+                <li>当たるのはキャラの特別スキン全10種（SSR 6%／SR 24%／R 70%）。10連はSR以上が1つ確定</li>
+                <li>当たったスキンはガチャ部屋で着せ替えできて、ロビーとバトルの服の色が変わる</li>
+                <li>コインはバトルで上位に入るともらえる。同じスキンが重なると🪙30に変わるよ</li>
+              </ul>
+            </div>
+
+          </div>
+        </div>
+      </section>
+
+      <!-- 部屋：ガチャ部屋（仕組みは gacha.js、排出プールは data.js） -->
+      <section class="room" id="room-gacha">
+        <div class="room-head">
+          <h2>🎁 ガチャ部屋</h2>
+          <p>コインで宝箱ガチャを回して、キャラの特別スキンを集めよう。当たったスキンは着せ替えできるよ。</p>
+          <button class="back-btn" data-go="lobby">← ロビーに戻る</button>
+        </div>
+        <div class="room-body">
+          <div class="gacha-wallet">
+            所持コイン 🪙 <b id="gachaCoinVal">494</b>
+            <span>バトルで上位に入るとコインがもらえるよ（結果画面で表示）</span>
+          </div>
+
+          <div class="gacha-machine">
+            <div class="gacha-chest" id="gachaChest" aria-hidden="true">🎁</div>
+            <div class="gacha-chest-name">海賊宝箱ガチャ</div>
+            <p class="gacha-msg" id="gachaMsg">スキンは全10種。SSRは黄金のジャック／虹羽のルビー／海賊王ドン！</p>
+            <div class="gacha-btns">
+              <button class="gacha-btn" id="gacha1Btn">1回回す<small>🪙 100</small></button>
+              <button class="gacha-btn ten" id="gacha10Btn">10連で回す<small>🪙 900（100お得）・SR以上1つ確定</small></button>
+            </div>
+            <p class="gacha-rates">排出率：SSR 6% ／ SR 24% ／ R 70%　・　同じスキンが重なったら 🪙 30 に自動で変わるよ</p>
+          </div>
+
+          <div class="gacha-results" id="gachaResults" aria-live="polite"></div>
+
+          <h3 class="gacha-subhead">🎒 集めたスキン</h3>
+          <p class="gacha-note" id="gachaColNote">まだスキンがないよ。ガチャを回して集めよう！着せるとロビーとバトルの服の色が変わるよ。</p>
+          <div class="gacha-collection" id="gachaCollection"></div>
+        </div>
+      </section>
+
+      <!-- 部屋：仲間部屋（中身の生成は lobby.js の renderCrew()） -->
+      <section class="room" id="room-crew">
+        <div class="room-head">
+          <h2>👥 仲間部屋</h2>
+          <p>バトルで戦うライバルたちだよ。全員倒して海賊王になろう。</p>
+          <button class="back-btn" data-go="lobby">← ロビーに戻る</button>
+        </div>
+        <div class="room-body">
+          <div class="crew-list" id="crewList"></div>
+          <div class="info-card card-spaced">
+            <h3>⛵ 船団のコツ</h3>
+            序盤は宝箱でキューブを集めて強くなり、中盤は毒ゾーンの中心に先回り。HPが減ったら3秒逃げ切って自動回復で立て直そう。終盤は弾のリロード切れを狙ったり、回復しようと逃げる敵を追ったり、溜め攻撃を当てて一気に決めよう。
+          </div>
+        </div>
+      </section>
+
+      <!-- 部屋：設定部屋（スマホ操作の位置設定。仕組みは input.js） -->
+      <section class="room" id="room-settings">
+        <div class="room-head">
+          <h2>⚙️ 設定</h2>
+          <p>効果音のON/OFFと音量、スマホのスティックと攻撃ボタンの位置を変えられるよ。変えたらすぐ反映されるよ。</p>
+          <button class="back-btn" data-go="lobby">← ロビーに戻る</button>
+        </div>
+        <div class="room-body">
+          <div class="settings-group">
+            <h3>🔊 効果音</h3>
+            <div class="seg-row" role="group" aria-label="効果音のオンオフ">
+              <button class="seg-btn" id="sfxOnBtn" type="button">🔊 音あり</button>
+              <button class="seg-btn" id="sfxOffBtn" type="button">🔇 音なし</button>
+            </div>
+            <label class="slider-row">音量 <b id="sfxVolVal">80%</b>
+              <input type="range" id="sfxVolRange" min="0" max="100" step="5" value="80">
+            </label>
+            <button class="ghost-btn" id="sfxTestBtn" type="button">▶ 試しに聞いてみる（剣→矢→大砲→爆発→キューブ→溜め）</button>
+            <p class="settings-note">攻撃・爆発・被弾・キューブ取得・カウントダウン・優勝などに効果音が鳴るよ。溜めている間は音程がだんだん上がる専用の音も鳴るよ。バトル中は画面上の「🔊 音ON」ボタンでも切り替えられるよ。音は最初のタップやキー操作のあとから鳴り始めるよ（ブラウザの決まり）。</p>
+          </div>
+
+          <div class="settings-preview-wrap">
+            <div class="settings-preview" id="settingsPreview" aria-label="バトル画面でのボタン位置のプレビュー">
+              <span class="preview-label">バトル画面のイメージ（プレビューのボタンはドラッグでも動かせるよ）</span>
+              <div class="preview-joy" id="previewJoy"><i></i></div>
+              <div class="preview-atk" id="previewAtk">⚔️<br>攻撃</div>
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <h3>かんたんプリセット</h3>
+            <div class="preset-row">
+              <button class="preset-btn" id="presetDefault" type="button">標準<br><small>スティック左 ／ 攻撃 右</small></button>
+              <button class="preset-btn" id="presetSwap" type="button">左右を入れ替え<br><small>スティック右 ／ 攻撃 左</small></button>
+              <button class="preset-btn" id="presetHigh" type="button">高め<br><small>両方を上にずらす</small></button>
+              <button class="preset-btn" id="presetLow" type="button">低め<br><small>両方を下にずらす</small></button>
+            </div>
+          </div>
+
+          <div class="settings-cols">
+            <div class="settings-group">
+              <h3>🕹️ 移動スティック</h3>
+              <div class="seg-row" role="group" aria-label="スティックの左右">
+                <button class="seg-btn" id="joySideLeft" type="button">左下</button>
+                <button class="seg-btn" id="joySideRight" type="button">右下</button>
+              </div>
+              <label class="slider-row">下からの高さ <b id="joyBottomVal">96</b>
+                <input type="range" id="joyBottomRange" min="24" max="190" step="2" value="96">
+              </label>
+              <label class="slider-row">端からの距離 <b id="joyInsetVal">14</b>
+                <input type="range" id="joyInsetRange" min="4" max="72" step="2" value="14">
+              </label>
+              <label class="slider-row">大きさ <b id="joyScaleVal">100%</b>
+                <input type="range" id="joyScaleRange" min="75" max="130" step="5" value="100">
+              </label>
+            </div>
+
+            <div class="settings-group">
+              <h3>⚔️ 攻撃ボタン</h3>
+              <div class="seg-row" role="group" aria-label="攻撃ボタンの左右">
+                <button class="seg-btn" id="atkSideLeft" type="button">左下</button>
+                <button class="seg-btn" id="atkSideRight" type="button">右下</button>
+              </div>
+              <label class="slider-row">下からの高さ <b id="atkBottomVal">96</b>
+                <input type="range" id="atkBottomRange" min="24" max="190" step="2" value="96">
+              </label>
+              <label class="slider-row">端からの距離 <b id="atkInsetVal">14</b>
+                <input type="range" id="atkInsetRange" min="4" max="72" step="2" value="14">
+              </label>
+              <label class="slider-row">大きさ <b id="atkScaleVal">100%</b>
+                <input type="range" id="atkScaleRange" min="75" max="130" step="5" value="100">
+              </label>
+            </div>
+          </div>
+
+          <button class="ghost-btn settings-reset" id="touchResetBtn" type="button">↩ ボタンの位置を標準に戻す</button>
+          <p class="settings-note">PCではスティックと攻撃ボタンは出ないので、この設定はスマホ（タッチ操作）のときだけ使われるよ。</p>
+        </div>
+      </section>
+
+      <!-- 部屋：オンライン部屋（友達とオンライン対戦。仕組みは net.js、
+           サーバーは assets/server/ の Cloudflare Worker + Durable Objects） -->
+      <section class="room" id="room-online">
+        <div class="room-head">
+          <h2>🌐 オンライン対戦</h2>
+          <p>離れた友達と一緒にバトル！部屋を作る／コードで入る、足りない人数はBOTが入るよ。</p>
+          <button class="back-btn" data-go="lobby">← ロビーに戻る</button>
+        </div>
+        <div class="room-body">
+          <p class="net-status" id="netStatus" aria-live="polite"></p>
+          <button class="net-btn gold net-reconnect hidden" id="netReconnectBtn" type="button">🔄 再接続する（同じ部屋につなぎ直す）</button>
+
+          <!-- つなぐ前：名前・キャラ・部屋を作る／入る -->
+          <div id="netSetupView">
+            <div class="net-card">
+              <h3>🎮 あなたの参加情報</h3>
+              <label class="net-label" for="netNameInput">名前（相手に表示されるよ）</label>
+              <input class="net-input" id="netNameInput" type="text" maxlength="12" placeholder="プレイヤー" autocomplete="off">
+              <label class="net-label" for="netCharSel">使うキャラ</label>
+              <select class="net-select" id="netCharSel"></select>
+              <div id="netVeraRow" class="hidden">
+                <label class="net-label" for="netVeraSel">ヴェラーのモード</label>
+                <select class="net-select" id="netVeraSel">
+                  <option value="spiral">🌀 螺旋フレイム型</option>
+                  <option value="shot">🔥 炎玉ショット型</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="net-grid">
+              <div class="net-card">
+                <h3>🚪 部屋を作る</h3>
+                <p>部屋を作ると<b>ルームコード（6文字）</b>が出るよ。そのコードを友達に伝えてね。あなたがホスト（進行役）になるよ。</p>
+                <button class="bigbtn" id="netCreateBtn" type="button">🚪 部屋を作る</button>
+              </div>
+              <div class="net-card">
+                <h3>🔑 部屋に入る</h3>
+                <p>友達から聞いたルームコードを入れてね。</p>
+                <label class="net-label" for="netCodeInput">ルームコード</label>
+                <input class="net-input net-code-input" id="netCodeInput" type="text" maxlength="6" placeholder="ABC123" autocomplete="off" autocapitalize="characters">
+                <button class="bigbtn" id="netJoinBtn" type="button">🔑 部屋に入る</button>
+              </div>
+            </div>
+
+            <div class="net-card">
+              <h3>☁️ サーバーの用意（初回だけ）</h3>
+              <p>オンライン対戦には、Cloudflare の対戦サーバー（Workers + Durable Objects）が要るよ。サーバーのコードはこのゲームに同梱してあるので、ダウンロードして Cloudflare にデプロイしてね（JavaScript のまま・無料枠で始められるよ）。</p>
+              <ol class="net-steps">
+                <li>下のボタンから <b>worker.js</b> と <b>wrangler.toml</b> と <b>手順書（README.md）</b>をダウンロード</li>
+                <li>Cloudflare の画面で Worker を作り、worker.js の中身を貼ってデプロイ（Durable Object のバインディング <b>ROOM</b> → クラス <b>Room</b> も追加。詳しくは手順書）</li>
+                <li>デプロイで出た URL（例：https://yohoho-online.xxx.workers.dev）を下に貼って保存</li>
+                <li>友達も同じ URL を設定すれば、一緒に遊べるよ</li>
+              </ol>
+              <div class="net-dl-row">
+                <a class="net-dl" href="assets/server/worker.js" download>⬇ worker.js</a>
+                <a class="net-dl" href="assets/server/wrangler.toml" download>⬇ wrangler.toml</a>
+                <a class="net-dl" href="assets/server/README.md" download>⬇ 手順書 README.md</a>
+              </div>
+              <label class="net-label" for="netServerUrl">サーバーURL</label>
+              <div class="net-row">
+                <input class="net-input" id="netServerUrl" type="url" placeholder="https://yohoho-online.xxx.workers.dev" autocomplete="off">
+                <button class="net-btn gold" id="netSaveUrlBtn" type="button">保存</button>
+              </div>
+              <p class="net-note">URLはこの端末にだけ保存されるよ。</p>
+            </div>
+          </div>
+
+          <!-- 待機室：コードとメンバー一覧、ホストはバトル開始 -->
+          <div id="netWaitView" class="hidden">
+            <div class="net-code-wrap">
+              <div>
+                <div class="net-code-label">ルームコード（友達に伝えてね）</div>
+                <div class="net-code" id="netRoomCode">------</div>
+              </div>
+              <button class="net-btn" id="netCopyBtn" type="button">📋 コードをコピー</button>
+            </div>
+            <p class="net-member-count" id="netMemberCount"></p>
+            <div class="net-members" id="netMemberList"></div>
+            <div class="net-wait-note" id="netGuestWaitNote">ホストがバトルを開始するのを待ってね。名前やキャラを変えたいときは、一度「部屋を出る」で出てから変えて、入り直してね。</div>
+            <button class="bigbtn" id="netStartBtn" type="button">⚔️ バトル開始！</button>
+            <button class="net-btn wide" id="netLeaveBtn" type="button">🚪 部屋を出る</button>
+            <p class="net-note">バトルは10人制。集まった友達以外の枠はBOTが入るよ。ゲストが途中で抜けたら、そのキャラはBOTが引き継ぐよ。ホストが抜けると試合は終了します。</p>
+          </div>
+        </div>
+      </section>
+
+    </div><!-- /#startScreen -->
+  </div><!-- /#wrap -->
+
+  <!-- ================= 横画面案内オーバーレイ（スマホ縦向きのときだけ） =================
+       スマホ（タッチ端末）で縦向きのとき、ロビー・各部屋・バトルの
+       すべての画面の上に全画面で表示して裏のゲームを隠す。
+       横向きに戻ると消えて、そのまま続きが遊べる。
+       出し分けは input.js の updateRotateOverlay() が html に付ける
+       show-rotate クラス（判定は既存の is-touch と同じ3条件）。
+       PC（マウス／キーボード）では絶対に出ない。
+       見た目は base.css の #rotateOverlay。 -->
+  <div id="rotateOverlay" role="alert" aria-live="polite">
+    <div class="rotate-card">
+      <div class="rotate-phone" aria-hidden="true">
+        <svg viewBox="0 0 48 48" width="72" height="72" focusable="false">
+          <rect x="15" y="5" width="18" height="38" rx="4" fill="none" stroke="#ffc93c" stroke-width="3"/>
+          <line x1="21" y1="38" x2="27" y2="38" stroke="#ffc93c" stroke-width="3" stroke-linecap="round"/>
+        </svg>
+        <span class="rotate-arrow" aria-hidden="true">↻</span>
+      </div>
+      <h2 class="rotate-title">画面を横向きにしてください</h2>
+      <p class="rotate-text">このゲームはスマホでは<b>横画面専用</b>だよ。<br>端末を横に回すと、そのまま遊べるよ。</p>
+      <p class="rotate-sub">🏴‍☠️ ヨーホーホー！横画面で出航しよう</p>
+    </div>
+  </div>
+
+  <!--
+    JS：役割ごとに分割（読み込む順番が大事。この順で読み込むこと）
+      assets/js/sound.js  … 効果音：Web Audio で合成する効果音とON/OFF・音量設定
+      assets/js/data.js   … データ：キャラ性能・バランス数値・ガチャ排出プール
+      assets/js/lobby.js  … ロビー：部屋の切り替え・キャラ立ち絵・キャラ／仲間リスト生成
+      assets/js/gacha.js  … ガチャ：抽選・コイン・スキンの着せ替え
+      assets/js/game.js   … バトル本体：戦闘・BOT・毒ゾーン・自動回復・描画
+      assets/js/input.js  … 操作：キーボード／スティック／ボタンを game.js につなぐ
+      assets/js/net.js    … オンライン対戦：Cloudflare の対戦サーバーと WebSocket でつなぐ
+    サーバー（別途 Cloudflare にデプロイする。ゲーム本体とは別ファイル）：
+      assets/server/worker.js … Worker + Durable Objects（部屋管理と状態同期の中継）
+  -->
+  <script src="js/sound.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/lobby.js"></script>
+  <script src="js/gacha.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/input.js"></script>
+  <script src="js/net.js"></script>
+  <script>
+    /* PWA：Service Worker を登録して、オフラインでも遊べるようにする */
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js').catch(() => {});
+      });
+    }
+  </script>
+</body>
+</html>

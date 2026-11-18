@@ -1,0 +1,47 @@
+/* ============================================================
+   オンライン部屋：assets/css/net.css
+   部屋を作る／入る・待機室・サーバーの用意の見た目
+   ============================================================ */
+.net-status{margin:0 0 12px;padding:10px 14px;border-radius:12px;background:#00000055;border:2px solid #ffffff2e;font-weight:900;font-size:14px;line-height:1.5}
+.net-status:empty{display:none}
+.net-status.ok{border-color:#2ed573;color:#b8ffd2}
+.net-status.err{border-color:#ff6b81;color:#ffd3da}
+.net-reconnect{margin:0 0 12px}
+
+.net-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media (max-width:720px){.net-grid{grid-template-columns:1fr}}
+.net-card{background:#12325ecc;border:3px solid #ffffff2e;border-radius:18px;padding:16px}
+.net-card h3{margin:0 0 8px;font-size:19px}
+.net-card p{margin:0 0 10px;font-size:13px;line-height:1.6;font-weight:700;opacity:.92}
+.net-card p:last-child{margin-bottom:0}
+
+.net-label{display:block;font-weight:900;font-size:13px;margin:10px 0 6px;color:#9fd8ff}
+.net-input,.net-select{width:100%;box-sizing:border-box;background:#0b2b52;color:#fff;border:2px solid #ffffff33;border-radius:12px;padding:11px 13px;font-weight:800;font-size:15px;font-family:inherit;min-height:48px}
+.net-input::placeholder{color:#7fa6c9}
+.net-code-input{text-transform:uppercase;letter-spacing:.35em;font-size:19px;font-weight:900;text-align:center}
+.net-row{display:flex;gap:8px;flex-wrap:wrap;align-items:stretch}
+.net-row .net-input{flex:1;min-width:140px}
+.net-btn{background:#fff;color:#12325e;border:0;border-bottom:4px solid #b9c9d8;border-radius:999px;padding:11px 18px;font-weight:900;font-size:15px;min-height:48px;font-family:inherit;cursor:pointer}
+.net-btn:active{transform:translateY(2px)}
+.net-btn.gold{background:var(--gold);color:#231900;border-bottom-color:var(--gold-dark)}
+.net-btn.wide{width:100%;margin-top:10px}
+.net-note{font-size:12px!important;opacity:.75!important}
+
+.net-code-wrap{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:#0b2b52;border:2px dashed var(--gold);border-radius:16px;padding:12px 16px;margin-bottom:12px}
+.net-code-label{font-weight:900;font-size:13px;color:#9fd8ff}
+.net-code{font-size:34px;font-weight:900;letter-spacing:.3em;color:var(--gold);line-height:1}
+.net-member-count{font-weight:900;font-size:14px;margin:0 0 10px;color:#cfeaff}
+.net-members{display:flex;flex-direction:column;gap:8px;margin-bottom:14px}
+.net-member{display:flex;align-items:center;gap:10px;background:#0b2b52d9;border:2px solid #ffffff2e;border-radius:14px;padding:10px 14px;flex-wrap:wrap}
+.net-member.me{border-color:var(--gold)}
+.net-member-emoji{font-size:24px}
+.net-member-name{font-weight:900;font-size:16px}
+.net-member-char{font-weight:800;font-size:13px;color:#9fd8ff}
+.net-host-badge{margin-left:auto;background:var(--gold);color:#231900;border-radius:999px;padding:3px 12px;font-size:12px;font-weight:900}
+.net-wait-note{background:#00000044;border-radius:12px;padding:10px 14px;font-weight:800;font-size:13.5px;line-height:1.6;margin-bottom:12px}
+
+.net-steps{margin:0;padding-left:20px;font-size:13.5px;line-height:1.75;font-weight:700}
+.net-steps b{color:#ffb35c}
+.net-dl-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.net-dl{display:inline-block;background:#0b2b52;color:#fff;border:2px solid #ffffff33;border-bottom:4px solid #00000055;border-radius:999px;padding:9px 16px;font-weight:900;font-size:13.5px;text-decoration:none;min-height:24px}
+.net-dl:active{transform:translateY(2px)}

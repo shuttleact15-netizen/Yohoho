@@ -1,0 +1,16 @@
+# ============================================================
+#  ヨーホーホー オンライン対戦サーバー（Cloudflare Workers）
+#  デプロイ方法は同じフォルダの README.md を見てね。
+#  無料枠（Workers Free + Durable Objects の SQLite）で動きます。
+# ============================================================
+name = "yohoho-online"
+main = "worker.js"
+compatibility_date = "2024-11-01"
+
+[[durable_objects.bindings]]
+name = "ROOM"
+class_name = "Room"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room"]

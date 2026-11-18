@@ -1,0 +1,127 @@
+/* ============================================================
+   部屋：キャラ部屋／作戦部屋／仲間部屋（rooms.css）
+   ロビー以外の「部屋」はここだけ触ればOK
+   ※ ガチャ部屋の見た目は gacha.css に分けた
+   ============================================================ */
+.room{display:none;flex-direction:column;min-height:100%}
+.room.is-active{display:flex}
+.room-head{display:flex;align-items:center;gap:10px;padding:14px 16px 4px;flex-wrap:wrap}
+.room-head h2{margin:0;font-size:clamp(22px,4vw,32px)}
+.room-head p{margin:0;font-weight:800;color:#cfeaff;font-size:13px}
+.back-btn{margin-left:auto;background:#fff;color:#12325e;border:0;border-bottom:4px solid #b9c9d8;border-radius:999px;padding:10px 18px;font-weight:900;min-height:44px}
+.room-body{padding:14px 16px 22px;overflow:auto}
+
+/* キャラ部屋：並び替え／表示切り替えツールバー */
+.chars-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.sort-label{display:flex;align-items:center;gap:8px;font-weight:900;font-size:13.5px}
+#charSort{background:#0b2b52;color:#fff;border:2px solid #ffffff33;border-radius:999px;padding:9px 14px;font-weight:900;font-size:14px;min-height:44px;font-family:inherit}
+.view-toggle{display:flex;gap:6px;margin-left:auto;flex-wrap:wrap}
+.view-btn{background:#0b2b52;border:2px solid #ffffff33;border-bottom:4px solid #00000055;color:#fff;border-radius:999px;padding:9px 14px;font-weight:900;font-size:13.5px;min-height:44px}
+.view-btn.active{background:var(--gold);color:#231900;border-color:#ffe9a8}
+.view-btn:active{transform:translateY(2px)}
+
+/* キャラ部屋 */
+.chars{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;align-items:start}
+/* コンパクト表示：顔と名前だけの小さなタイルを多めに並べる */
+.chars.view-compact{grid-template-columns:repeat(3,1fr)}
+@media(max-width:760px){.chars.view-compact{grid-template-columns:repeat(2,1fr)}}
+.char.compact-card{text-align:center;padding:12px 8px}
+.char.compact-card .face{width:64px;height:64px;margin:0 auto}
+.char.compact-card h3{font-size:15px;margin:6px 0 2px}
+/* リスト表示：1列の横並び行。性能は数字で右側にまとめる */
+.chars.view-list{grid-template-columns:1fr}
+.char.list-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 14px}
+.char.list-row .face{width:56px;height:56px;flex:none}
+.char.list-row .list-main h3{margin:0 0 2px;font-size:17px}
+.char.list-row .list-main .role{margin-top:0}
+.char.list-row .list-stats{margin-left:auto;font-weight:900;font-size:13.5px;text-align:right;line-height:1.6}
+@media(max-width:760px){.chars{grid-template-columns:1fr}}
+/* ★ .char は <button> 要素。ボタンはブラウザによっては中身に合わせて
+   高さが伸びず、説明文がカードの外にはみ出して次のカードに重なることがある。
+   display:block＋height:auto＋align-self:start で、必ず中身の高さに合わせる */
+.char{display:block;height:auto;align-self:start;min-width:0;overflow-wrap:break-word;text-align:left;border:3px solid #ffffff2e;background:#12325ecc;border-radius:18px;padding:14px;color:#fff;width:100%}
+.char p{overflow-wrap:break-word}
+.char.selected{border-color:var(--gold);background:#2a4a7a;outline:3px solid #ffc93c55}
+.char .face{width:84px;height:84px}
+.char .face svg{width:100%;height:100%;display:block}
+.char h3{margin:8px 0 4px;font-size:19px}
+.char p{margin:0;font-size:13px;line-height:1.55;opacity:.92;font-weight:700}
+.char .role{display:inline-block;background:#00000044;border-radius:999px;padding:2px 10px;font-size:11px;font-weight:900;color:#9fd8ff;margin-top:6px}
+.statbar{display:grid;grid-template-columns:64px 1fr 44px;gap:8px;align-items:center;font-size:12px;font-weight:900;margin-top:7px}
+.statbar .track{height:10px;background:#00000066;border-radius:99px;overflow:hidden}
+.statbar .track i{display:block;height:100%}
+.charge-line{margin-top:10px;background:#00000044;border-radius:10px;padding:7px 10px;font-size:12px;font-weight:900}
+.charge-line b{color:#ffb35c}
+.reload-line{margin-top:6px;background:#00000044;border-radius:10px;padding:7px 10px;font-size:12px;font-weight:900}
+.reload-line b{color:#7fd4ff}
+.char-detail{margin-top:14px;background:#0b2b52d9;border:2px solid #ffffff2e;border-radius:18px;padding:16px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;scroll-margin-top:10px}
+.char-detail .big{width:118px;flex:none}
+.char-detail .big svg{width:100%;display:block}
+.char-detail h3{margin:0 0 6px;font-size:22px}
+.char-detail p{margin:0;font-weight:700;line-height:1.6;font-size:14px;max-width:560px}
+
+/* ヴェラー専用：モード選択（案1／案2） */
+.mode-select{margin-top:12px;width:100%}
+.mode-select-title{font-weight:900;font-size:13.5px;margin-bottom:8px;color:#ffb35c}
+.mode-btns{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+@media(max-width:560px){.mode-btns{grid-template-columns:1fr}}
+.mode-btn{text-align:left;background:#0b2b52;border:2px solid #ffffff33;border-bottom:4px solid #00000055;color:#fff;border-radius:14px;padding:10px 12px;font-weight:800;line-height:1.45;min-height:48px}
+.mode-btn b{display:block;font-size:15px;margin-bottom:2px}
+.mode-btn small{font-size:11.5px;color:#cfeaff;font-weight:700}
+.mode-btn.active{background:#7a2b0d;border-color:var(--gold);outline:3px solid #ffc93c55}
+.mode-btn.active small{color:#ffe9c9}
+
+/* 作戦部屋・仲間部屋のカード */
+.cards2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:760px){.cards2{grid-template-columns:1fr}}
+.info-card{background:#12325ecc;border:2px solid #ffffff2e;border-radius:18px;padding:16px;font-weight:700;line-height:1.7;font-size:14px}
+.info-card h3{margin:0 0 8px;font-size:18px}
+.info-card ul{margin:0;padding-left:20px}
+.crew-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.crew-member{background:#12325ecc;border:2px solid #ffffff2e;border-radius:16px;padding:12px;text-align:center;font-weight:900}
+.crew-member .face{font-size:36px;display:block}
+.crew-member small{display:block;color:#9fd8ff;font-weight:800;margin-top:4px;line-height:1.5}
+
+/* キャラ部屋：足の速さメモ */
+.speed-line{margin-top:10px;background:#00000044;border-radius:10px;padding:7px 10px;font-size:12px;font-weight:900}
+.speed-line b{color:#7bed9f}
+
+/* 部屋内の余白ユーティリティ（旧：HTMLの style 属性だったもの） */
+.room-action-btn{margin-top:14px}
+.card-spaced{margin-top:12px}
+
+/* スマホ横画面（高さが低い画面）：キャラカードの間隔を広げ、
+   説明文が窮屈にならないよう余白を足す。PCの見た目は変えない */
+@media (orientation:landscape) and (max-height:540px){
+  .room-body{padding:16px 18px 30px}
+  .chars{gap:20px 14px}
+  .chars.view-compact{gap:14px}
+  .char{padding:16px}
+  .char p{line-height:1.65}
+  .char-detail{margin-top:18px}
+}
+
+/* 設定部屋：スマホのスティック／攻撃ボタンの位置設定 */
+.settings-preview-wrap{margin-bottom:14px}
+.settings-preview{position:relative;height:230px;border-radius:18px;overflow:hidden;border:3px solid #ffffff2e;background:repeating-conic-gradient(#8fce45 0% 25%,#85c43c 0% 50%) 0 0/92px 92px}
+.preview-label{position:absolute;top:8px;left:10px;right:10px;text-align:center;font-size:12px;font-weight:900;color:#123;background:#ffffffcc;border-radius:999px;padding:4px 8px}
+.preview-joy{position:absolute;width:82px;height:82px;border-radius:50%;background:#ffffff2e;border:2px solid #ffffff66;touch-action:none;cursor:grab;z-index:2}
+.preview-joy i{position:absolute;width:36px;height:36px;border-radius:50%;background:#ffffffdd;left:23px;top:23px;pointer-events:none}
+.preview-atk{position:absolute;width:64px;height:64px;border-radius:50%;background:#ff4757;border:3px solid #ffffff55;color:#fff;font-weight:900;font-size:13px;line-height:1.25;display:grid;place-items:center;text-align:center;touch-action:none;cursor:grab;z-index:2}
+.settings-group{background:#12325ecc;border:2px solid #ffffff2e;border-radius:18px;padding:14px 16px;margin-bottom:12px}
+.settings-group h3{margin:0 0 10px;font-size:17px}
+.settings-cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:760px){.settings-cols{grid-template-columns:1fr}}
+.preset-row{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+@media(max-width:760px){.preset-row{grid-template-columns:1fr 1fr}}
+.preset-btn{background:#0b2b52;border:2px solid #ffffff33;border-bottom:4px solid #00000055;color:#fff;border-radius:14px;padding:10px 6px;font-weight:900;font-size:14px;line-height:1.35;min-height:56px}
+.preset-btn small{font-size:11px;color:#9fd8ff;font-weight:800}
+.preset-btn:active{transform:translateY(2px)}
+.seg-row{display:flex;gap:8px;margin-bottom:12px}
+.seg-btn{flex:1;background:#0b2b52;border:2px solid #ffffff33;color:#fff;border-radius:999px;padding:9px 10px;font-weight:900;min-height:44px}
+.seg-btn.active{background:var(--gold);color:#231900;border-color:#ffe9a8}
+.slider-row{display:block;font-weight:900;font-size:13px;margin-top:10px}
+.slider-row b{color:var(--gold)}
+.slider-row input[type="range"]{display:block;width:100%;margin-top:6px;accent-color:var(--gold);height:32px}
+.settings-reset{margin-top:2px}
+.settings-note{font-weight:800;font-size:12.5px;color:#cfeaff;line-height:1.6;margin:10px 2px 0}
